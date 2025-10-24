@@ -11,7 +11,10 @@ import android.webkit.MimeTypeMap;
 
 import org.xbmc.kore.utils.LogUtils;
 
+import java.io.File;
+import java.io.InputStream;
 import java.io.FileInputStream;
+import java.io.RandomAccessFile;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -72,6 +75,8 @@ public class HttpApp extends NanoHTTPD {
     public Response serve(IHTTPSession session) {
 
         Map<String, List<String>> params = session.getParameters();
+        Map<String, String> headers = session.getHeaders();
+
         if (localFileLocationList == null) {
             return forbidden;
         }
@@ -83,39 +88,93 @@ public class HttpApp extends NanoHTTPD {
             return forbidden;
         }
 
-        FileInputStream fis;
-        String mimeType = null;
         try {
             if (params.containsKey("number")) {
-                int file_number = Integer.parseInt(params.get("number").get(0));
-
-                LocalFileLocation localFileLocation = localFileLocationList.get(file_number);
-                fis = new FileInputStream(localFileLocation.fullPath);
-                mimeType = localFileLocation.getMimeType();
+                return handleFileContent(params.get("number"), headers.get("range"));
             } else if (params.containsKey("uri")) {
-                int uri_number = Integer.parseInt(params.get("uri").get(0));
-                Uri uri = localUriList.get(uri_number);
-
-                try {
-                    // ensure that we can read the URI's content, even if the component
-                    // that originally provided this permission has died
-                    context.grantUriPermission(context.getPackageName(), uri,
-                                               Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } catch (SecurityException e) {
-                    LogUtils.LOGE(LogUtils.makeLogTag(HttpApp.class), e.toString());
-                    return forbidden;
-                }
-
-                fis = (FileInputStream) context.getContentResolver().openInputStream(uri);
+                return handleUriContent(params.get("uri"));
             } else {
                 return forbidden;
             }
         } catch (FileNotFoundException e) {
             LogUtils.LOGW(LogUtils.makeLogTag(HttpApp.class), e.toString());
             return forbidden;
+        } catch (IOException e) {
+            LogUtils.LOGW(LogUtils.makeLogTag(HttpApp.class), e.toString());
+            return forbidden;
+        }
+    }
+
+    private Response handleFileContent(List<String> param, String rangeHeader) throws FileNotFoundException, IOException {
+        int fileNumber = Integer.parseInt(param.get(0));
+        LocalFileLocation localFileLocation = localFileLocationList.get(fileNumber);
+        File file = new File(localFileLocation.fullPath);
+
+        if (!file.exists() || !file.isFile()) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT, "");
         }
 
-        return newChunkedResponse(Response.Status.OK, mimeType, fis);
+        String mimeType = localFileLocation.getMimeType();
+        long fileSize = file.length();
+
+        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+            String range = rangeHeader.substring("bytes=".length()).trim();
+            long startPos = 0;
+            long endPos = fileSize - 1;
+        
+            if (range.startsWith("-")) {
+                long suffix = Long.parseLong(range.substring(1));
+                startPos = Math.max(0, fileSize - suffix);
+            } else {
+                String[] parts = range.split("-", 2);
+                startPos = Long.parseLong(parts[0]);
+                if(parts.length > 1 && !parts[1].isEmpty()) {
+                    endPos = Math.min(Long.parseLong(parts[1]), fileSize - 1);
+                }
+            }
+
+            if(startPos < 0 || startPos >= fileSize || startPos > endPos) {
+                Response res = newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, NanoHTTPD.MIME_PLAINTEXT, "");
+                res.addHeader("Content-Range", "bytes */" + fileSize);
+                return res;
+            }
+
+            long contentLength = endPos - startPos + 1;
+
+            RandomAccessFile raf = new RandomAccessFile(file, "r");
+            raf.seek(startPos);
+            InputStream rfis = new RandomAccessFileInputStream(raf, contentLength);
+            
+            Response res = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mimeType, rfis, contentLength);
+            res.addHeader("Content-Range", "bytes " + startPos + "-" + endPos + "/" + fileSize);
+            res.addHeader("Accept-Ranges", "bytes");
+            res.addHeader("Content-Length", String.valueOf(contentLength));
+            return res;
+        } else {
+            InputStream fileStream = new FileInputStream(file);
+            Response res = newFixedLengthResponse(Response.Status.OK, mimeType, fileStream, fileSize);
+            res.addHeader("Accept-Ranges", "bytes");
+            res.addHeader("Content-Length", String.valueOf(fileSize));
+            return res;
+        }
+    }
+
+    private Response handleUriContent(List<String> param) throws FileNotFoundException {
+        int uri_number = Integer.parseInt(param.get(0));
+        Uri uri = localUriList.get(uri_number);
+
+        try {
+            // ensure that we can read the URI's content, even if the component
+            // that originally provided this permission has died
+            context.grantUriPermission(context.getPackageName(), uri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            LogUtils.LOGE(LogUtils.makeLogTag(HttpApp.class), e.toString());
+            return forbidden;
+        }
+
+        FileInputStream fis = (FileInputStream) context.getContentResolver().openInputStream(uri);
+        return newChunkedResponse(Response.Status.OK, null, fis);
     }
 
     public void addLocalFilePath(LocalFileLocation localFileLocation) {
