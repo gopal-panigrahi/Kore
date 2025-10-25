@@ -23,7 +23,7 @@ android {
         def supportedLocales = ["en",
                 "af-za", "ast", "be-by", "bg", "ca", "cs", "da-dk", "de",
                 "es", "es-MX", "eu", "fi", "fr", "hr", "hu", "it", "iw", "ja",
-                "ko", "lt", "nl", "pl", "pt", "pt-BR", "ru", "sk", "sl", "zh-CN"]
+                "ko", "lt", "nl", "pl", "pt", "pt-BR", "ru", "sk", "sl", "zh-CN", "sc"]
         buildConfigField "String[]", "SUPPORTED_LOCALES", "new String[]{\""+
                 supportedLocales.join("\",\"")+"\"}"
     }
