@@ -99,6 +99,12 @@
             android:defaultValue="true"
             app:singleLineTitle="false"/>
 
+        <SwitchPreferenceCompat
+            android:key="pref_show_hidden_local_files"
+            android:title="@string/show_hidden_local_files"
+            android:defaultValue="false"
+            app:singleLineTitle="false"/>
+
         <MultiSelectListPreference
             android:key="pref_nav_drawer_items"
             android:title="@string/nav_drawer_items"

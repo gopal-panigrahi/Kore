@@ -417,6 +417,7 @@
     <string name="show_notification">Show notification while playing</string>
     <string name="show_now_playing_panel">Show now playing panel</string>
     <string name="show_now_playing_panel_summary">Display a panel at the bottom of the screen when media is playing</string>
+    <string name="show_hidden_local_files">Show hidden local files</string>
     <string name="pause_during_calls">Pause during phone call</string>
     <string name="vibrate_on_remote">Vibrate on touch</string>
     <string name="always_sendtokodi_addon">Prefer SendToKodi addon</string>

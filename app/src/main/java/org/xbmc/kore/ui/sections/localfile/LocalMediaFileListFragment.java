@@ -39,10 +39,12 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.preference.PreferenceManager;
 
 import com.squareup.picasso.Picasso;
 
 import org.xbmc.kore.R;
+import org.xbmc.kore.Settings;
 import org.xbmc.kore.host.HostConnection;
 import org.xbmc.kore.host.HostManager;
 import org.xbmc.kore.jsonrpc.ApiCallback;
@@ -230,8 +232,14 @@ public class LocalMediaFileListFragment extends AbstractListFragment {
             file_list.add(0, new LocalFileLocation("..", getParentDirectory(dir.fullPath), true));
         }
 
+        boolean showHiddenFiles = PreferenceManager
+                                        .getDefaultSharedPreferences(requireContext())
+                                        .getBoolean(Settings.KEY_PREF_SHOW_HIDDEN_LOCAL_FILES, Settings.DEFAULT_PREF_SHOW_HIDDEN_LOCAL_FILES);
+
         for (File file : files) {
-            file_list.add(new LocalFileLocation(file.getName(), file.getAbsolutePath(), file.isDirectory()));
+            if (showHiddenFiles || (!file.isHidden() && !file.getName().startsWith("."))) {
+                file_list.add(new LocalFileLocation(file.getName(), file.getAbsolutePath(), file.isDirectory()));
+            }
         }
         ((MediaPictureListAdapter) getAdapter()).setFilelistItems(file_list);
     }
