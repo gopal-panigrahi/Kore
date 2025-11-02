@@ -8,6 +8,8 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.provider.OpenableColumns;
 import android.webkit.MimeTypeMap;
+import android.os.ParcelFileDescriptor;
+import android.os.ParcelFileDescriptor.AutoCloseInputStream;
 
 import org.xbmc.kore.utils.LogUtils;
 
@@ -68,6 +70,7 @@ public class HttpApp extends NanoHTTPD {
     private int currentIndex;
     private boolean currentIsFile;
     private final String token;
+    private record Range(long start, long end) { }
 
     private final Response forbidden = newFixedLengthResponse(Response.Status.FORBIDDEN, "", "");
 
@@ -92,7 +95,7 @@ public class HttpApp extends NanoHTTPD {
             if (params.containsKey("number")) {
                 return handleFileContent(params.get("number"), headers.get("range"));
             } else if (params.containsKey("uri")) {
-                return handleUriContent(params.get("uri"));
+                return handleUriContent(params.get("uri"), headers.get("range"));
             } else {
                 return forbidden;
             }
@@ -115,66 +118,92 @@ public class HttpApp extends NanoHTTPD {
         }
 
         String mimeType = localFileLocation.getMimeType();
-        long fileSize = file.length();
+        ParcelFileDescriptor pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+        return createRangeResponse(pfd, mimeType, rangeHeader);
+    }
 
-        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
-            String range = rangeHeader.substring("bytes=".length()).trim();
-            long startPos = 0;
-            long endPos = fileSize - 1;
-        
-            if (range.startsWith("-")) {
-                long suffix = Long.parseLong(range.substring(1));
-                startPos = Math.max(0, fileSize - suffix);
-            } else {
-                String[] parts = range.split("-", 2);
-                startPos = Long.parseLong(parts[0]);
-                if(parts.length > 1 && !parts[1].isEmpty()) {
-                    endPos = Math.min(Long.parseLong(parts[1]), fileSize - 1);
-                }
+    private Response handleUriContent(List<String> param, String rangeHeader) throws FileNotFoundException {
+        int uri_number = Integer.parseInt(param.get(0));
+        Uri uri = localUriList.get(uri_number);
+    
+        try {
+            context.grantUriPermission(context.getPackageName(), uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            LogUtils.LOGE(LogUtils.makeLogTag(HttpApp.class), e.toString());
+            return forbidden;
+        }
+    
+        try {
+            ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r");
+            if (pfd == null) { 
+                throw new IOException("Unable to open ParcelFileDescriptor");
             }
+            return createRangeResponse(pfd, "application/octet-stream", rangeHeader);
+        } catch (Exception e) {
+            LogUtils.LOGW(LogUtils.makeLogTag(HttpApp.class), "Range request failed, using full stream: " + e.getMessage());
+            InputStream fallbackStream = context.getContentResolver().openInputStream(uri);
+            return newChunkedResponse(Response.Status.OK, "application/octet-stream", fallbackStream);
+        }
+    }
 
-            if(startPos < 0 || startPos >= fileSize || startPos > endPos) {
+    private Response createRangeResponse(ParcelFileDescriptor pfd, String mimeType, String rangeHeader) throws IOException {
+        AutoCloseInputStream fis = null;
+        try {
+            long fileSize = pfd.getStatSize();
+            Range range = parseRangeHeader(rangeHeader, fileSize);
+            if (range == null) {
+                pfd.close();
                 Response res = newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, NanoHTTPD.MIME_PLAINTEXT, "");
                 res.addHeader("Content-Range", "bytes */" + fileSize);
                 return res;
             }
 
-            long contentLength = endPos - startPos + 1;
+            fis = new AutoCloseInputStream(pfd);
+            fis.getChannel().position(range.start());
+            long contentLength = range.end() - range.start() + 1;
 
-            RandomAccessFile raf = new RandomAccessFile(file, "r");
-            raf.seek(startPos);
-            InputStream rfis = new RandomAccessFileInputStream(raf, contentLength);
-            
-            Response res = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mimeType, rfis, contentLength);
-            res.addHeader("Content-Range", "bytes " + startPos + "-" + endPos + "/" + fileSize);
-            res.addHeader("Accept-Ranges", "bytes");
-            res.addHeader("Content-Length", String.valueOf(contentLength));
-            return res;
-        } else {
-            InputStream fileStream = new FileInputStream(file);
-            Response res = newFixedLengthResponse(Response.Status.OK, mimeType, fileStream, fileSize);
-            res.addHeader("Accept-Ranges", "bytes");
-            res.addHeader("Content-Length", String.valueOf(fileSize));
-            return res;
+            Response response = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mimeType, fis, contentLength);
+            response.addHeader("Accept-Ranges", "bytes");
+            response.addHeader("Content-Range", "bytes " + range.start() + "-" + range.end() + "/" + fileSize);
+            return response;
+        } catch (IOException e) {
+            if (fis == null) {
+                pfd.close();
+            }
+            throw e;
         }
     }
 
-    private Response handleUriContent(List<String> param) throws FileNotFoundException {
-        int uri_number = Integer.parseInt(param.get(0));
-        Uri uri = localUriList.get(uri_number);
-
-        try {
-            // ensure that we can read the URI's content, even if the component
-            // that originally provided this permission has died
-            context.grantUriPermission(context.getPackageName(), uri,
-                                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (SecurityException e) {
-            LogUtils.LOGE(LogUtils.makeLogTag(HttpApp.class), e.toString());
-            return forbidden;
+    private Range parseRangeHeader(String rangeHeader, long fileSize) {
+        if (rangeHeader == null || !rangeHeader.startsWith("bytes=")) {
+            return new Range(0, fileSize - 1);
         }
 
-        FileInputStream fis = (FileInputStream) context.getContentResolver().openInputStream(uri);
-        return newChunkedResponse(Response.Status.OK, null, fis);
+        try {
+            String range = rangeHeader.substring("bytes=".length()).trim();
+            long start = 0;
+            long end = fileSize - 1;
+        
+            if (range.startsWith("-")) {
+                long suffix = Long.parseLong(range.substring(1));
+                start = Math.max(0, fileSize - suffix);
+            } else {
+                String[] parts = range.split("-", 2);
+                start = Long.parseLong(parts[0]);
+                if(parts.length > 1 && !parts[1].isEmpty()) {
+                end = Math.min(Long.parseLong(parts[1]), fileSize - 1);
+                }
+            }
+
+            if (start < 0 || start >= fileSize || start > end) {
+                return null;
+            }
+
+            return new Range(start, end);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public void addLocalFilePath(LocalFileLocation localFileLocation) {
