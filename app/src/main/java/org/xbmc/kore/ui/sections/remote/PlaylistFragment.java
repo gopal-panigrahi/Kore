@@ -97,6 +97,7 @@ public class PlaylistFragment extends Fragment
      */
     private ListType.ItemsAll lastGetItemResult = null;
     private PlayerType.GetActivePlayersReturnType lastGetActivePlayerResult;
+    private PlayerType.PropertyValue lastGetPropertiesResult = null;
     private final HashMap<String, PlaylistHolder> playlists = new HashMap<>();
 
     private enum PLAYER_STATE {
@@ -253,6 +254,7 @@ public class PlaylistFragment extends Fragment
         playerState = PLAYER_STATE.PLAYING;
 
         lastGetItemResult = getItemResult;
+        lastGetPropertiesResult = getPropertiesResult;
         lastGetActivePlayerResult = getActivePlayerResult;
 
         if (!userSelectedTab) {
@@ -278,6 +280,7 @@ public class PlaylistFragment extends Fragment
         playerState = PLAYER_STATE.PAUSED;
 
         lastGetItemResult = getItemResult;
+        lastGetPropertiesResult = getPropertiesResult;
         lastGetActivePlayerResult = getActivePlayerResult;
 
         if (!userSelectedTab) {
@@ -294,6 +297,7 @@ public class PlaylistFragment extends Fragment
         if (lastGetActivePlayerResult != null)
             binding.playlistsBar.setIsPlaying(lastGetActivePlayerResult.type, false);
 
+        lastGetPropertiesResult = null;
         displayPlaylist();
 
         binding.playlist.clearChoices();
@@ -436,19 +440,14 @@ public class PlaylistFragment extends Fragment
         if (!binding.playlistsBar.getSelectedPlaylistType().contentEquals(lastGetActivePlayerResult.type) ||
             holder == null)
             return;
-
+        
+        int playlistActivePosition = lastGetPropertiesResult == null ? -1 : lastGetPropertiesResult.position;
         List<ListType.ItemsAll> playlistItems = holder.getPlaylistResult.items;
-        for (int i = 0; i < playlistItems.size(); i++) {
-            if ((playlistItems.get(i).id == lastGetItemResult.id) &&
-                (playlistItems.get(i).type.equals(lastGetItemResult.type))) {
-
-                //When user is dragging an item it is very annoying when we change the list position
-                if (!binding.playlist.isItemBeingDragged()) {
-                    binding.playlist.setSelection(i);
-                }
-
-                binding.playlist.setItemChecked(i, true);
+        if (playlistActivePosition >= 0 && playlistActivePosition < playlistItems.size()) {
+            if (!binding.playlist.isItemBeingDragged()) {
+                binding.playlist.setSelection(playlistActivePosition);
             }
+            binding.playlist.setItemChecked(playlistActivePosition, true);
         }
     }
 
