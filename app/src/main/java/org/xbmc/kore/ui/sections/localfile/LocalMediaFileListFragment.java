@@ -18,6 +18,7 @@ package org.xbmc.kore.ui.sections.localfile;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.os.Bundle;
@@ -26,6 +27,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
@@ -131,6 +135,31 @@ public class LocalMediaFileListFragment extends AbstractListFragment {
         super.onSaveInstanceState(outState);
         outState.putParcelable(CURRENT_DIR_LOCATION, currentDirLocation);
         outState.putString(ROOT_PATH, rootPath);
+    }
+
+    @Override
+    public void onCreateOptionsMenu(@NonNull Menu menu, MenuInflater inflater) {
+        inflater.inflate(R.menu.local_file_list, menu);
+
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(requireContext());
+        MenuItem showHidden = menu.findItem(R.id.action_show_hidden);
+        showHidden.setChecked(preferences.getBoolean(Settings.KEY_PREF_SHOW_HIDDEN_LOCAL_FILES, Settings.DEFAULT_PREF_SHOW_HIDDEN_LOCAL_FILES));
+        super.onCreateOptionsMenu(menu, inflater);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(requireContext());
+        int itemId = item.getItemId();
+        if (itemId == R.id.action_show_hidden) {
+            item.setChecked(!item.isChecked());
+            preferences.edit()
+                       .putBoolean(Settings.KEY_PREF_SHOW_HIDDEN_LOCAL_FILES, item.isChecked())
+                       .apply();
+            browseDirectory(currentDirLocation); 
+        }
+
+        return super.onOptionsItemSelected(item);
     }
 
     @Override
